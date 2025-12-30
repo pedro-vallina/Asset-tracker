@@ -8,10 +8,12 @@ import threading
 
 
 intervalos = {"5m":300, "15m":900, "1h":3600, "1d":86400}
-periods_intervals = {"15m":"1d", "1h":"1mo", "1d":"1y", "1wk":"10y", "1wk":"max"}
-intervals = list(periods_intervals.keys())
+intervals_dict={'1d': '15m', '1mo': '1h', '1y': '1d', '10y': '1wk', 'max': '1mo'} 
+# lista de periodos en orden para bucle
+periods = list(intervals_dict.keys())
 ticker_list = ["BTC-USD", "^GSPC", "NLR", "PPFB.DE"]
-data_log = pd.DataFrame()
+ticker_list_plot = ["BTC-USD", "S&P 500", "Uranium and Nuclear", "Physical Gold"]
+
 
 def interval_to_timedelta(interval: str) -> pd.Timedelta:
     if interval.endswith("mo"):
@@ -28,10 +30,10 @@ def interval_to_timedelta(interval: str) -> pd.Timedelta:
 
 
 class TimeSeriesData():
-    def __init__(self, df, interval, asset):
+    def __init__(self, df, interval, ticker):
         self.df = df
         self.interval = interval
-        self.asset = asset
+        self.ticker = ticker
         self.delta = interval_to_timedelta(self.interval)
         self.index = df.index
     
@@ -61,53 +63,75 @@ class MarketData():
             self.data[asset][interval] = ts
     
     
-def descargar_datos(ticker: str, period: str, interval: str, log: bool=False):
-    data = TimeSeriesData(df=yf.download(tickers=ticker, period=period, interval=interval), interval=interval, asset=ticker)
+def descargar_datos(ticker: str, period: str, interval: str, log: bool=False) -> TimeSeriesData:
+    data = yf.download(tickers=ticker, period=period, interval=interval)
+    data.columns = data.columns.get_level_values(0) #type: ignore
+    data = TimeSeriesData(data, interval=interval, ticker=ticker)
 
-    if log: return logaritmicar(data)
+    if log: return logaritmicar(data, interval=interval, ticker=ticker)
     else: return data
 
-def logaritmicar(data):
+def logaritmicar(data: TimeSeriesData, interval:str, ticker: str) -> TimeSeriesData:
+    data_log = pd.DataFrame()
     data_log["Low"] = np.log(data["Low"])
     data_log["High"] = np.log(data["High"])
+    data_log = TimeSeriesData(data_log, interval=interval, ticker=ticker)
     return data_log
 
-def plot(data):
-    plt.figure()
-    sns.set_theme(style="darkgrid")
-    sns.axes_style("darkgrid")
-    plt.plot(data["Low"])
-    plt.plot(data["High"])
-    plt.show(block=False)
+# Activar modo interactivo
+plt.ion()
+
+# Inicializamos la figura y los ejes
+sns.set_theme(style="darkgrid")
+fig, ax = plt.subplots()
+line_low, = ax.plot([], [], label="Low")
+line_high, = ax.plot([], [], label="High")
+ax.legend()
+
+def plot_update(data, ticker):
+    # Actualizamos los datos de las líneas
+    line_low.set_data(data.index, data["Low"])
+    line_high.set_data(data.index, data["High"])
+    
+    # Si cambia el tamaño del eje x, actualizarlo también
+    ax.set_xlim(data.index.min(), data.index.max())
+    ax.set_ylim(min(data["Low"]),
+                float(max(data["High"])))
+    
+    ax.set_title(ticker)
+    fig.canvas.draw()
+    fig.canvas.flush_events()
 
 
 index_asset = 0
 index_period = -1
 log=False
 while True:
-    interval = intervals[index_period]
-    data = descargar_datos(ticker_list[index_asset], periods_intervals[interval], interval, log=log)
-    plot(data)
+    period = periods[index_period]
+    interval = intervals_dict[period]
+    if index_asset!=1 and index_period in (4, -1): #Si no es spx y está en max, dejar interval en 1wk
+        interval = "1wk"
+    data = descargar_datos(ticker_list[index_asset], period, interval, log=log)
+    plot_update(data, ticker_list_plot[index_asset])
     last = data.index[-1]
 
     if last.tzinfo is None:
         now = pd.Timestamp.now()
     else:
         now = pd.Timestamp.now(tz=last.tz)
-    print(now-last)
+    #print(now-last)
 
-    boton = input("(Next: n. Prev: p | Nigger: u. Schmaller: s | Loga: l) -> ")
+    boton = input("(Next: n. Prev: p | Bigger: b. Smaller: s | Loga: l) -> ")
 
     while True:
         if boton=='n': index_asset +=1
         elif boton=='p': index_asset -=1
-        elif boton=='u': index_period +=1
+        elif boton=='b': index_period +=1
         elif boton=='s': index_period -=1
         elif boton=='l':
-            if log==False: log=True
-            else: log=False
+            log = not log
         break
-        
 
-    if index_asset in (-4, 4): index_asset=0
-    if index_period in (-5, 5): index_period=0
+    # Ajuste de índices para bucle circular
+    index_asset %= len(ticker_list)
+    index_period %= len(periods)
