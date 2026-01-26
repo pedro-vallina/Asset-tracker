@@ -8,7 +8,8 @@ import threading
 
 
 intervalos = {"5m":300, "15m":900, "1h":3600, "1d":86400}
-intervals_dict={'1d': '15m', '1mo': '1h', '1y': '1d', '10y': '1wk', 'max': '1mo'} 
+intervals_dict={'1d': '15m', '1mo': '4h', '1y': '1d', '10y': '1wk', 'max': '1mo'} 
+#Relación god: 1:3600
 # lista de periodos en orden para bucle
 periods = list(intervals_dict.keys())
 ticker_list = ["BTC-USD", "^GSPC", "NLR", "PPFB.DE"]
@@ -62,14 +63,18 @@ class MarketData():
         with self.lock:
             self.data[asset][interval] = ts
     
+    def __getitem__(self, key):
+        asset, interval = key
+        return self.data[asset][interval]
+
+data_dict = MarketData()
     
-def descargar_datos(ticker: str, period: str, interval: str, log: bool=False) -> TimeSeriesData:
+def descargar_datos(ticker: str, period: str, interval: str) -> TimeSeriesData:
     data = yf.download(tickers=ticker, period=period, interval=interval)
     data.columns = data.columns.get_level_values(0) #type: ignore
     data = TimeSeriesData(data, interval=interval, ticker=ticker)
-
-    if log: return logaritmicar(data, interval=interval, ticker=ticker)
-    else: return data
+    data_dict.add(data.ticker, data.interval, data)
+    return data
 
 def logaritmicar(data: TimeSeriesData, interval:str, ticker: str) -> TimeSeriesData:
     data_log = pd.DataFrame()
@@ -88,7 +93,7 @@ line_low, = ax.plot([], [], label="Low")
 line_high, = ax.plot([], [], label="High")
 ax.legend()
 
-def plot_update(data, ticker):
+def plot_update(data, ticker, log):
     # Actualizamos los datos de las líneas
     line_low.set_data(data.index, data["Low"])
     line_high.set_data(data.index, data["High"])
@@ -97,40 +102,45 @@ def plot_update(data, ticker):
     ax.set_xlim(data.index.min(), data.index.max())
     ax.set_ylim(min(data["Low"]),
                 float(max(data["High"])))
-    
-    ax.set_title(ticker)
+    if log==True:
+        title = f"{ticker} (log)"
+    else: title = ticker
+    ax.set_title(title)
     fig.canvas.draw()
     fig.canvas.flush_events()
 
 
 index_asset = 0
 index_period = -1
-log=False
+log = False
+
 while True:
     period = periods[index_period]
     interval = intervals_dict[period]
     if index_asset!=1 and index_period in (4, -1): #Si no es spx y está en max, dejar interval en 1wk
         interval = "1wk"
-    data = descargar_datos(ticker_list[index_asset], period, interval, log=log)
-    plot_update(data, ticker_list_plot[index_asset])
-    last = data.index[-1]
+    
+    ticker = ticker_list[index_asset]
 
-    if last.tzinfo is None:
-        now = pd.Timestamp.now()
-    else:
-        now = pd.Timestamp.now(tz=last.tz)
-    #print(now-last)
+    try:
+        data = data_dict[ticker, interval]
+        print("Datos reciclados de data_dict")
+    except KeyError:
+        data = descargar_datos(ticker, period, interval)
+        print("Datos descargados nuevos")
+
+    if log: data = logaritmicar(data, interval=interval, ticker=ticker)
+    plot_update(data, ticker_list_plot[index_asset], log=log)
+    last = data.index[-1]
 
     boton = input("(Next: n. Prev: p | Bigger: b. Smaller: s | Loga: l) -> ")
 
-    while True:
-        if boton=='n': index_asset +=1
-        elif boton=='p': index_asset -=1
-        elif boton=='b': index_period +=1
-        elif boton=='s': index_period -=1
-        elif boton=='l':
-            log = not log
-        break
+    if boton=='n': index_asset +=1
+    elif boton=='p': index_asset -=1
+    elif boton=='b': index_period +=1
+    elif boton=='s': index_period -=1
+    elif boton=='l':
+        log = not log
 
     # Ajuste de índices para bucle circular
     index_asset %= len(ticker_list)
