@@ -1,12 +1,12 @@
 import yfinance as yf
-import matplotlib.pyplot as plt
+from gpiozero import Button
+from collections import defaultdict
 import seaborn as sns
 import numpy as np
 import pandas as pd
-from collections import defaultdict
-import keyboard
+import matplotlib.pyplot as plt
 
-
+print("Librerías importadas")
 intervalos = {"5m":300, "15m":900, "1h":3600, "1d":86400}
 intervals_dict={'1d': '15m', '1mo': '4h', '1y': '1d', '10y': '1wk', 'max': '1mo'} 
 #Relación god: 1:3600
@@ -36,25 +36,8 @@ def loga():
     global log
     log = not log
 
-keyboard.on_press_key("n", lambda e: next())
-keyboard.on_press_key("p", lambda e: prev())
-keyboard.on_press_key("b", lambda e: bigger())
-keyboard.on_press_key("s", lambda e: smaller())
-keyboard.on_press_key("l", lambda e: loga())
-
-"""    boton = input("(Next: n. Prev: p | Bigger: b. Smaller: s | Loga: l) -> ")
-
-    if boton=='n': index_asset +=1
-    elif boton=='p': index_asset -=1
-    elif boton=='b': index_period +=1
-    elif boton=='s': index_period -=1
-    elif boton=='l':
-        log = not log
-
-    # Ajuste de índices para bucle circular
-    index_asset %= len(ticker_list)
-    index_period %= len(periods)
-"""
+b_next = Button(21)
+b_next.when_pressed = next
 
 
 def interval_to_timedelta(interval: str) -> pd.Timedelta:
@@ -163,10 +146,14 @@ while True:
 
     try:
         data = data_dict[ticker, interval]
-        print("Datos reciclados de data_dict")
+        if data.needs_update():
+            data = descargar_datos(ticker, period, interval)
+            print("Datos actualizados")
+        else: print("Datos reciclados de data_dict")
     except KeyError:
         data = descargar_datos(ticker, period, interval)
         print("Datos descargados nuevos")
+
 
     if log: data = logaritmicar(data, interval=interval, ticker=ticker)
     plot_update(data, ticker_list_plot[index_asset], log=log)
