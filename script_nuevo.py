@@ -5,6 +5,8 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import tkinter as tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 print("Librerías importadas")
 intervalos = {"5m":300, "15m":900, "1h":3600, "1d":86400}
@@ -36,8 +38,20 @@ def loga():
     global log
     log = not log
 
-b_next = Button(21)
+b_next = Button(26)
 b_next.when_pressed = next
+
+b_prev = Button(4)
+b_prev.when_pressed = prev
+
+b_bigger = Button(5)
+b_bigger.when_pressed = bigger
+
+b_smaller = Button(25)
+b_smaller.when_pressed = smaller
+
+b_loga = Button(23)
+b_loga.when_pressed = loga
 
 
 def interval_to_timedelta(interval: str) -> pd.Timedelta:
@@ -105,14 +119,22 @@ def logaritmicar(data: TimeSeriesData, interval:str, ticker: str) -> TimeSeriesD
     data_log = TimeSeriesData(data_log, interval=interval, ticker=ticker)
     return data_log
 
-# Activar modo interactivo
-plt.ion()
 
-# Inicializamos la figura y los ejes
 sns.set_theme(style="darkgrid")
+root = tk.Tk()
+root.attributes("-fullscreen", True)
+# Sin cursor
+root.config(cursor="none")
 fig, ax = plt.subplots()
+canvas = FigureCanvasTkAgg(fig, master=root)
+canvas.draw()
+
+widget = canvas.get_tk_widget()
+widget.pack(fill="both", expand=True)
+
 line_low, = ax.plot([], [], label="Low")
 line_high, = ax.plot([], [], label="High")
+
 ax.legend()
 
 def plot_update(data, ticker, log):
@@ -128,8 +150,10 @@ def plot_update(data, ticker, log):
         title = f"{ticker} (log)"
     else: title = ticker
     ax.set_title(title)
-    fig.canvas.draw()
-    fig.canvas.flush_events()
+
+    canvas.draw_idle()
+    root.update_idletasks()
+    root.update()
 
 
 index_asset = 0
@@ -158,3 +182,6 @@ while True:
     if log: data = logaritmicar(data, interval=interval, ticker=ticker)
     plot_update(data, ticker_list_plot[index_asset], log=log)
     last = data.index[-1]
+
+    root.update()
+    root.after(50)
