@@ -11,34 +11,40 @@ import traceback
 import time
 
 print("Librerías importadas")
-intervalos = {"5m":300, "15m":900, "1h":3600, "1d":86400}
-intervals_dict={'1d': '15m', '1mo': '4h', '1y': '1d', '10y': '1wk', 'max': '1mo'} 
-#Relación god: 1:3600
+intervalos = {"5m": 300, "15m": 900, "1h": 3600, "1d": 86400}
+intervals_dict = {'1d': '15m', '1mo': '4h', '1y': '1d', '10y': '1wk', 'max': '1mo'} 
+# Relación god: 1:3600
 # lista de periodos en orden para bucle
 periods = list(intervals_dict.keys())
 ticker_list = ["BTC-USD", "^GSPC", "NLR", "PPFB.DE"]
 ticker_list_plot = ["BTC-USD", "S&P 500", "Uranium and Nuclear", "Physical Gold"]
 
+state_changed = True
 
 def next():
-    global index_asset
+    global index_asset, state_changed
     index_asset = (index_asset + 1) % len(ticker_list)
+    state_changed = True
 
 def prev():
-    global index_asset
+    global index_asset, state_changed
     index_asset = (index_asset - 1) % len(ticker_list)
+    state_changed = True
 
 def bigger():
-    global index_period
+    global index_period, state_changed
     index_period = (index_period + 1) % len(periods)
+    state_changed = True
 
 def smaller():
-    global index_period
+    global index_period, state_changed
     index_period = (index_period - 1) % len(periods)
+    state_changed = True
 
 def loga():
-    global log
+    global log, state_changed
     log = not log
+    state_changed = True
 
 try:
     b_next = Button(26)
@@ -61,7 +67,7 @@ except Exception as e:
 
 def interval_to_timedelta(interval: str) -> pd.Timedelta:
     if interval.endswith("mo"):
-        return pd.Timedelta(days=30*int(interval[:-2]))  # aproximación
+        return pd.Timedelta(days=30 * int(interval[:-2]))  # aproximación
     if interval.endswith("wk"):
         return pd.Timedelta(weeks=int(interval[:-2]))
     if interval.endswith("d"):
@@ -122,12 +128,12 @@ def descargar_datos(ticker: str, period: str, interval: str) -> TimeSeriesData:
     try:
         data = yf.download(tickers=ticker, period=period, interval=interval, progress=False)
         if data is None or data.empty:
-            print(f"Aviso: Datos vacíos descargados para {ticker} ({period}, {interval})")
+            print(f"Aviso: Datos vacíos para {ticker} ({period}, {interval})")
             if (ticker, interval) in data_dict:
                 return data_dict[ticker, interval]
             raise ValueError(f"No hay datos para {ticker}")
         
-        # Aplanar MultiIndex de columnas si viene de versiones recientes de yfinance
+        # Aplanar MultiIndex si viene presente
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
             
@@ -189,6 +195,7 @@ leg = ax.legend(loc="upper left", facecolor="#1e222d", edgecolor="#2a2e39")
 for text in leg.get_texts():
     text.set_color("#e0e0e0")
 
+ax.set_title("Cargando...", color="#ffffff", fontsize=15, pad=10, fontweight="bold")
 fig.tight_layout(pad=1.5)
 
 canvas = FigureCanvasTkAgg(fig, master=root)
@@ -197,6 +204,9 @@ canvas.draw()
 widget = canvas.get_tk_widget()
 widget.configure(bg="#121212", highlightthickness=0)
 widget.pack(fill="both", expand=True)
+
+# Renderizar inmediatamente la ventana inicial oscura
+root.update()
 
 
 def plot_update(data, ticker, log):
@@ -225,35 +235,47 @@ def plot_update(data, ticker, log):
 index_asset = 0
 index_period = -1
 log = False
+state_changed = True
+last_check_time = 0
 
 while True:
     try:
+        now = time.time()
         period = periods[index_period]
         interval = intervals_dict[period]
-        if index_asset != 1 and index_period in (4, -1): # Si no es spx y está en max, dejar interval en 1wk
+        if index_asset != 1 and index_period in (4, -1):  # Si no es spx y está en max, dejar interval en 1wk
             interval = "1wk"
         
         ticker = ticker_list[index_asset]
-
-        try:
-            data = data_dict[ticker, interval]
-            if data.needs_update():
-                data = descargar_datos(ticker, period, interval)
-                print("Datos actualizados")
-            else:
-                print("Datos reciclados de data_dict")
-        except (KeyError, Exception):
-            data = descargar_datos(ticker, period, interval)
-            print("Datos descargados nuevos")
-
-        if log:
-            data = logaritmicar(data, interval=interval, ticker=ticker)
         
-        plot_update(data, ticker_list_plot[index_asset], log=log)
+        # Solo verificar si necesita descarga o si cambió el estado (botón presionado)
+        check_interval = state_changed or ((now - last_check_time) > 10)
+        
+        if check_interval:
+            last_check_time = now
+            needs_redraw = False
+            
+            if (ticker, interval) not in data_dict:
+                data = descargar_datos(ticker, period, interval)
+                needs_redraw = True
+                print(f"[{ticker}] Datos descargados nuevos")
+            else:
+                data = data_dict[ticker, interval]
+                if data.needs_update():
+                    data = descargar_datos(ticker, period, interval)
+                    needs_redraw = True
+                    print(f"[{ticker}] Datos actualizados")
+            
+            if state_changed or needs_redraw:
+                plot_data = data
+                if log:
+                    plot_data = logaritmicar(data, interval=interval, ticker=ticker)
+                plot_update(plot_data, ticker_list_plot[index_asset], log=log)
+                state_changed = False
 
     except Exception as e:
         print(f"Error en ciclo de actualización: {e}")
         traceback.print_exc()
 
     root.update()
-    root.after(50)
+    time.sleep(0.05)
